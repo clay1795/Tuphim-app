@@ -9,6 +9,7 @@ const { connect } = require('./config/database');
 const authRoutes = require('./routes/auth');
 const commentRoutes = require('./routes/comments');
 const notificationRoutes = require('./routes/notifications');
+const adminRoutes = require('./routes/admin');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -50,6 +51,7 @@ app.use('/api/auth', rateLimit({
 app.use('/api/auth', authRoutes);
 app.use('/api/comments', commentRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
