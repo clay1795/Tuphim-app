@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Comment = require('../models/Comment');
+const Notification = require('../models/Notification');
 const { authMiddleware } = require('../middleware/auth');
 
 // ── GET /api/comments/:slug ─ lấy bình luận của 1 phim
@@ -62,6 +63,21 @@ router.post('/:id/reply', authMiddleware, async (req, res) => {
             text: text.trim(),
         });
         await comment.save();
+
+        // Đẩy thông báo đến người sở hữu bình luận (nếu khác người trả lời)
+        const authorId = comment.user?.toString();
+        const replierId = req.user.userId?.toString();
+        if (authorId && authorId !== replierId) {
+            await Notification.create({
+                recipient: comment.user,
+                type: 'reply',
+                title: 'Ôi! Bình luận của bạn được trả lời',
+                body: `${req.user.username || 'Ai đó'} đã trả lời: "${text.trim().slice(0, 60)}${text.length > 60 ? '...' : ''}"`,
+                fromUser: req.user.username,
+                movieSlug: comment.slug,
+                commentId: comment._id,
+            }).catch(() => { }); // silent fail, don’t break reply if noti fails
+        }
 
         res.json({ success: true, data: comment });
     } catch (err) {
