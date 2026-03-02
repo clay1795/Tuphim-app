@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Comment = require('../models/Comment');
 const Notification = require('../models/Notification');
+const User = require('../models/User');
 const { authMiddleware } = require('../middleware/auth');
 
 // ── GET /api/comments/:slug ─ lấy bình luận của 1 phim
@@ -79,13 +80,28 @@ router.post('/:id/reply', authMiddleware, async (req, res) => {
         });
         await comment.save();
 
-        // Đẩy thông báo đến người sở hữu bình luận/trả lời (nếu khác người đang trả lời)
+        // Đẩy thông báo đến người được nhắc tới (mention @username) hoặc người sở hữu
         const replierId = req.user.userId?.toString();
-        if (originalAuthorId && originalAuthorId !== replierId) {
+        let recipientId = originalAuthorId;
+        let recipientName = originalAuthorName;
+
+        // Extract @username from text (e.g. "@clay hello")
+        const mentionMatch = text.match(/^@([a-zA-Z0-9_]+)/);
+        if (mentionMatch) {
+            const mentionedUsername = mentionMatch[1];
+            // Look up the mentioned user
+            const mentionedUser = await User.findOne({ username: mentionedUsername }).lean();
+            if (mentionedUser) {
+                recipientId = mentionedUser._id.toString();
+                recipientName = mentionedUser.username;
+            }
+        }
+
+        if (recipientId && recipientId !== replierId) {
             await Notification.create({
-                recipient: originalAuthorId,
+                recipient: recipientId,
                 type: 'reply',
-                title: `Ôi! ${originalAuthorName ? `Bình luận của ${originalAuthorName}` : 'Bình luận của bạn'} được trả lời`,
+                title: `Ôi! ${recipientName ? `Bình luận của ${recipientName}` : 'Bình luận của bạn'} được trả lời`,
                 body: `${req.user.username || 'Ai đó'} đã trả lời: "${text.trim().slice(0, 60)}${text.length > 60 ? '...' : ''}"`,
                 fromUser: req.user.username,
                 movieSlug: comment.slug,
