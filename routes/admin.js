@@ -10,10 +10,10 @@ router.get('/stats', authMiddleware, adminMiddleware, async (req, res) => {
     try {
         const totalUsers = await User.countDocuments();
         const totalVipUsers = await User.countDocuments({
-            isVip: true,
+            'vip.isVip': true,
             $or: [
-                { vipExpirationDate: { $gt: new Date() } },
-                { vipExpirationDate: null }
+                { 'vip.expiredAt': { $gt: new Date() } },
+                { 'vip.expiredAt': null }
             ]
         });
         const totalComments = await Comment.countDocuments();
@@ -51,7 +51,7 @@ router.post('/broadcast', authMiddleware, adminMiddleware, async (req, res) => {
         const notificationsToInsert = users.map(u => ({
             recipient: u._id,
             type: 'system',
-            title: `[Anh Tư] ${title.trim()}`,
+            title: `Anh Tư💕 ${title.trim()}`,
             body: message.trim(),
             read: false,
             createdAt: new Date()
