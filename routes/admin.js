@@ -51,7 +51,7 @@ router.post('/broadcast', authMiddleware, adminMiddleware, async (req, res) => {
         const notificationsToInsert = users.map(u => ({
             recipient: u._id,
             type: 'system',
-            title: title.trim(),
+            title: `[Anh Tư] ${title.trim()}`,
             body: message.trim(),
             read: false,
             createdAt: new Date()
