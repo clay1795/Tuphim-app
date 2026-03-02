@@ -35,8 +35,8 @@ router.post('/:slug', authMiddleware, async (req, res) => {
 
         const comment = await Comment.create({
             slug: req.params.slug,
-            user: req.user.id,
-            username: req.user.username || req.user.name || 'Người dùng',
+            user: req.user.userId,
+            username: req.user.username || 'Người dùng',
             text: text.trim(),
         });
 
@@ -57,8 +57,8 @@ router.post('/:id/reply', authMiddleware, async (req, res) => {
         if (!comment) return res.status(404).json({ success: false, message: 'Bình luận không tồn tại' });
 
         comment.replies.push({
-            user: req.user.id,
-            username: req.user.username || req.user.name || 'Người dùng',
+            user: req.user.userId,
+            username: req.user.username || 'Người dùng',
             text: text.trim(),
         });
         await comment.save();
@@ -75,7 +75,7 @@ router.post('/:id/like', authMiddleware, async (req, res) => {
         const comment = await Comment.findById(req.params.id);
         if (!comment) return res.status(404).json({ success: false, message: 'Bình luận không tồn tại' });
 
-        const uid = req.user.id;
+        const uid = req.user.userId;
         const idx = comment.likes.indexOf(uid);
         if (idx === -1) comment.likes.push(uid);
         else comment.likes.splice(idx, 1);
@@ -93,7 +93,7 @@ router.delete('/:id', authMiddleware, async (req, res) => {
         const comment = await Comment.findById(req.params.id);
         if (!comment) return res.status(404).json({ success: false, message: 'Bình luận không tồn tại' });
 
-        const isOwner = comment.user.toString() === req.user.id;
+        const isOwner = comment.user.toString() === req.user.userId;
         const isAdmin = req.user.role === 'admin';
         if (!isOwner && !isAdmin) return res.status(403).json({ success: false, message: 'Không có quyền xóa bình luận này' });
 
