@@ -3,6 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
+const Notification = require('../models/Notification');
 const { authMiddleware, adminMiddleware } = require('../middleware/auth');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -53,12 +54,34 @@ router.post('/register', [
             return res.status(409).json({ success: false, message: 'Email hoặc username đã tồn tại' });
         }
 
-        const user = await User.create({ email, username, fullName, password });
+        // Tặng 30 ngày VIP cho tài khoản mới
+        const vipExpiredAt = new Date();
+        vipExpiredAt.setDate(vipExpiredAt.getDate() + 30);
+
+        const user = await User.create({
+            email, username, fullName, password,
+            vip: {
+                isVip: true,
+                plan: 'monthly',
+                expiredAt: vipExpiredAt,
+                grantedAt: new Date()
+            }
+        });
+
+        // Bắn thông báo chào mừng
+        await Notification.create({
+            recipient: user._id,
+            type: 'system',
+            title: '[Anh Tư] Chào mừng! 🎉',
+            body: 'Tài khoản mới của bạn đã được nhận thưởng 1 tháng VIP miễn phí. Chúc bạn xem phim vui vẻ!',
+            read: false,
+        });
+
         const token = generateToken(user);
 
         res.status(201).json({
             success: true,
-            message: 'Đăng ký thành công',
+            message: 'Đăng ký thành công và nhận thưởng 1 tháng VIP',
             data: { user: user.getPublicProfile(), token },
         });
     } catch (err) {
@@ -149,6 +172,70 @@ router.post('/change-password', authMiddleware, [
         res.json({ success: true, message: 'Đổi mật khẩu thành công' });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+});
+
+// ── POST /api/auth/reset-password ─────────────────────────────────────────────
+router.post('/reset-password', [
+    body('email').isEmail().withMessage('Email không hợp lệ').normalizeEmail(),
+    body('username').notEmpty().withMessage('Username là bắt buộc').trim(),
+    body('newPassword').isLength({ min: 6 }).withMessage('Mật khẩu mới tối thiểu 6 ký tự')
+        .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
+        .withMessage('Mật khẩu mới cần chữ hoa, chữ thường và số'),
+], validate, async (req, res) => {
+    try {
+        const { email, username, newPassword } = req.body;
+
+        // Find user by both email and username exact match
+        const user = await User.findOne({ email, username });
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Email và Username không khớp với hệ thống' });
+        }
+
+        user.password = newPassword;
+        await user.save();
+        res.json({ success: true, message: 'Đặt lại mật khẩu thành công. Vui lòng đăng nhập lại.' });
+    } catch (err) {
+        console.error('Reset password error:', err);
+        res.status(500).json({ success: false, message: 'Thao tác thất bại, thử lại sau' });
+    }
+});
+
+// ── PUT /api/auth/update-info ─────────────────────────────────────────────────
+router.put('/update-info', authMiddleware, [
+    body('fullName').optional().isLength({ min: 2, max: 50 }).withMessage('Tên từ 2-50 ký tự').trim(),
+    body('email').optional().isEmail().withMessage('Email không hợp lệ').normalizeEmail(),
+    body('gender').optional().isIn(['Nam', 'Nữ', 'Không xác định']).withMessage('Giới tính không hợp lệ'),
+], validate, async (req, res) => {
+    try {
+        const { fullName, email, gender } = req.body;
+        const user = await User.findById(req.user.userId);
+
+        if (!user) return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });
+
+        // If changing email, ensure it's not already taken
+        if (email && email !== user.email) {
+            const existing = await User.findOne({ email });
+            if (existing) return res.status(409).json({ success: false, message: 'Email này đã được sử dụng' });
+            user.email = email;
+        }
+
+        if (fullName) user.fullName = fullName;
+        if (gender) user.gender = gender;
+
+        await user.save();
+
+        // Also need a new token if email changed
+        const token = generateToken(user);
+
+        res.json({
+            success: true,
+            message: 'Cập nhật thông tin thành công',
+            data: { user: user.getPublicProfile(), token }
+        });
+    } catch (err) {
+        console.error('Update info error:', err);
+        res.status(500).json({ success: false, message: 'Cập nhật thất bại, thử lại sau' });
     }
 });
 

@@ -15,6 +15,7 @@ const userSchema = new mongoose.Schema({
     },
     fullName: { type: String, required: true, trim: true, minlength: 2, maxlength: 50 },
     avatar: { type: String, default: null },
+    gender: { type: String, enum: ['Nam', 'Nữ', 'Không xác định'], default: 'Không xác định' },
     role: { type: String, enum: ['user', 'admin'], default: 'user' },
 
     // VIP Membership
