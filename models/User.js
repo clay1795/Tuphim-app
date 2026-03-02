@@ -26,6 +26,9 @@ const userSchema = new mongoose.Schema({
         grantedAt: { type: Date, default: null },
     },
 
+    // Watch History
+    watchHistory: [{ type: mongoose.Schema.Types.Mixed }],
+
     // Account status
     isActive: { type: Boolean, default: true },
     lastLogin: { type: Date },

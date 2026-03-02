@@ -311,5 +311,90 @@ router.get('/lookup', authMiddleware, adminMiddleware, async (req, res) => {
     }
 });
 
+// ── WATCH HISTORY ENDPOINTS ───────────────────────────────────────────────────
+
+// GET /api/auth/history
+router.get('/history', authMiddleware, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.userId);
+        if (!user) return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });
+        res.json({ success: true, data: user.watchHistory || [] });
+    } catch (err) {
+        console.error('Get history error', err);
+        res.status(500).json({ success: false, message: 'Lỗi lấy danh sách lịch sử' });
+    }
+});
+
+// POST /api/auth/history
+router.post('/history', authMiddleware, async (req, res) => {
+    try {
+        const { slug } = req.body;
+        if (!slug) return res.status(400).json({ success: false, message: 'Thiếu slug của phim' });
+
+        const user = await User.findById(req.user.userId);
+        if (!user) return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });
+
+        let history = user.watchHistory || [];
+
+        // Remove existing entry for the same movie to move it to the front
+        history = history.filter(item => item.slug !== slug);
+
+        // Add new entry with updated timestamp
+        const newEntry = { ...req.body, watchedAt: new Date() };
+        history.unshift(newEntry);
+
+        // Limit to 50 items
+        if (history.length > 50) history = history.slice(0, 50);
+
+        user.watchHistory = history;
+        // Mark as modified since it's a Mixed array type
+        user.markModified('watchHistory');
+        await user.save();
+
+        res.json({ success: true, message: 'Đã lưu lịch sử', data: user.watchHistory });
+    } catch (err) {
+        console.error('Save history error', err);
+        res.status(500).json({ success: false, message: 'Lỗi lưu lịch sử' });
+    }
+});
+
+// DELETE /api/auth/history/:slug
+router.delete('/history/:slug', authMiddleware, async (req, res) => {
+    try {
+        const { slug } = req.params;
+        const user = await User.findById(req.user.userId);
+        if (!user) return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });
+
+        let history = user.watchHistory || [];
+        history = history.filter(item => item.slug !== slug);
+
+        user.watchHistory = history;
+        user.markModified('watchHistory');
+        await user.save();
+
+        res.json({ success: true, message: 'Đã xóa khỏi lịch sử', data: user.watchHistory });
+    } catch (err) {
+        console.error('Delete history error', err);
+        res.status(500).json({ success: false, message: 'Lỗi xóa lịch sử' });
+    }
+});
+
+// DELETE /api/auth/history
+router.delete('/history', authMiddleware, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.userId);
+        if (!user) return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });
+
+        user.watchHistory = [];
+        user.markModified('watchHistory');
+        await user.save();
+
+        res.json({ success: true, message: 'Đã xóa toàn bộ lịch sử' });
+    } catch (err) {
+        console.error('Clear history error', err);
+        res.status(500).json({ success: false, message: 'Lỗi xóa toàn bộ lịch sử' });
+    }
+});
+
 module.exports = router;
 
