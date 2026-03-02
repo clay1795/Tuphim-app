@@ -54,7 +54,22 @@ router.post('/:id/reply', authMiddleware, async (req, res) => {
         if (!text || text.trim().length < 1) return res.status(400).json({ success: false, message: 'Nội dung không được để trống' });
         if (text.length > 500) return res.status(400).json({ success: false, message: 'Trả lời tối đa 500 ký tự' });
 
-        const comment = await Comment.findById(req.params.id);
+        let comment = await Comment.findById(req.params.id);
+        let originalAuthorId = null;
+        let originalAuthorName = null;
+
+        if (comment) {
+            originalAuthorId = comment.user?.toString();
+            originalAuthorName = comment.username;
+        } else {
+            comment = await Comment.findOne({ 'replies._id': req.params.id });
+            if (comment) {
+                const originalReply = comment.replies.id(req.params.id);
+                originalAuthorId = originalReply.user?.toString();
+                originalAuthorName = originalReply.username;
+            }
+        }
+
         if (!comment) return res.status(404).json({ success: false, message: 'Bình luận không tồn tại' });
 
         comment.replies.push({
@@ -64,14 +79,13 @@ router.post('/:id/reply', authMiddleware, async (req, res) => {
         });
         await comment.save();
 
-        // Đẩy thông báo đến người sở hữu bình luận (nếu khác người trả lời)
-        const authorId = comment.user?.toString();
+        // Đẩy thông báo đến người sở hữu bình luận/trả lời (nếu khác người đang trả lời)
         const replierId = req.user.userId?.toString();
-        if (authorId && authorId !== replierId) {
+        if (originalAuthorId && originalAuthorId !== replierId) {
             await Notification.create({
-                recipient: comment.user,
+                recipient: originalAuthorId,
                 type: 'reply',
-                title: 'Ôi! Bình luận của bạn được trả lời',
+                title: `Ôi! ${originalAuthorName ? `Bình luận của ${originalAuthorName}` : 'Bình luận của bạn'} được trả lời`,
                 body: `${req.user.username || 'Ai đó'} đã trả lời: "${text.trim().slice(0, 60)}${text.length > 60 ? '...' : ''}"`,
                 fromUser: req.user.username,
                 movieSlug: comment.slug,
@@ -88,16 +102,31 @@ router.post('/:id/reply', authMiddleware, async (req, res) => {
 // ── POST /api/comments/:id/like ─ toggle like bình luận
 router.post('/:id/like', authMiddleware, async (req, res) => {
     try {
-        const comment = await Comment.findById(req.params.id);
+        const uid = req.user.userId;
+        let isReplyLike = false;
+
+        let comment = await Comment.findById(req.params.id);
+        if (!comment) {
+            comment = await Comment.findOne({ 'replies._id': req.params.id });
+            if (comment) isReplyLike = true;
+        }
+
         if (!comment) return res.status(404).json({ success: false, message: 'Bình luận không tồn tại' });
 
-        const uid = req.user.userId;
-        const idx = comment.likes.indexOf(uid);
-        if (idx === -1) comment.likes.push(uid);
-        else comment.likes.splice(idx, 1);
-        await comment.save();
-
-        res.json({ success: true, liked: idx === -1, likes: comment.likes.length });
+        if (isReplyLike) {
+            const reply = comment.replies.id(req.params.id);
+            const idx = reply.likes.indexOf(uid);
+            if (idx === -1) reply.likes.push(uid);
+            else reply.likes.splice(idx, 1);
+            await comment.save();
+            return res.json({ success: true, liked: idx === -1, likes: reply.likes.length });
+        } else {
+            const idx = comment.likes.indexOf(uid);
+            if (idx === -1) comment.likes.push(uid);
+            else comment.likes.splice(idx, 1);
+            await comment.save();
+            return res.json({ success: true, liked: idx === -1, likes: comment.likes.length });
+        }
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
