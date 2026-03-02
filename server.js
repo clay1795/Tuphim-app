@@ -7,6 +7,7 @@ const rateLimit = require('express-rate-limit');
 
 const { connect } = require('./config/database');
 const authRoutes = require('./routes/auth');
+const commentRoutes = require('./routes/comments');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -46,6 +47,7 @@ app.use('/api/auth', rateLimit({
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
+app.use('/api/comments', commentRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
