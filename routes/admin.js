@@ -3,6 +3,7 @@ const router = express.Router();
 const User = require('../models/User');
 const Comment = require('../models/Comment');
 const Notification = require('../models/Notification');
+const Setting = require('../models/Setting');
 const { authMiddleware, adminMiddleware } = require('../middleware/auth');
 
 // GET /api/admin/stats
@@ -66,8 +67,43 @@ router.post('/broadcast', authMiddleware, adminMiddleware, async (req, res) => {
             count: users.length
         });
     } catch (err) {
-        console.error('Lỗi API/admin/broadcast:', err);
         res.status(500).json({ success: false, message: 'Lỗi server khi gửi thông báo' });
+    }
+});
+
+// GET /api/admin/settings
+router.get('/settings', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const settings = await Setting.find({});
+        // Chuyển array thành object type { [key]: value } cho dễ xài ở frontend
+        const configMap = {};
+        settings.forEach(s => {
+            configMap[s.key] = s.value;
+        });
+        res.json({ success: true, data: configMap });
+    } catch (err) {
+        console.error('Lỗi GET /settings:', err);
+        res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+});
+
+// POST /api/admin/settings
+router.post('/settings', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const { key, value, description } = req.body;
+        if (!key) {
+            return res.status(400).json({ success: false, message: 'Thiếu key cấu hình' });
+        }
+
+        await Setting.findOneAndUpdate(
+            { key },
+            { $set: { value, description } },
+            { upsert: true, new: true }
+        );
+        res.json({ success: true, message: 'Lưu cấu hình thành công' });
+    } catch (err) {
+        console.error('Lỗi POST /settings:', err);
+        res.status(500).json({ success: false, message: 'Lỗi server' });
     }
 });
 

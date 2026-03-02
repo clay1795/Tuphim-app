@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
+const Setting = require('../models/Setting');
 const { authMiddleware, adminMiddleware } = require('../middleware/auth');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -54,34 +55,43 @@ router.post('/register', [
             return res.status(409).json({ success: false, message: 'Email hoặc username đã tồn tại' });
         }
 
-        // Tặng 30 ngày VIP cho tài khoản mới
-        const vipExpiredAt = new Date();
-        vipExpiredAt.setDate(vipExpiredAt.getDate() + 30);
+        // Fetch config for welcome bonus
+        const setting = await Setting.findOne({ key: 'welcomeBonus' });
+        const welcomeBonus = setting?.value || { enabled: true, days: 30 };
 
-        const user = await User.create({
-            email, username, fullName, password,
-            vip: {
+        const payload = { email, username, fullName, password };
+        let isVipGranted = false;
+
+        if (welcomeBonus.enabled && welcomeBonus.days > 0) {
+            const vipExpiredAt = new Date();
+            vipExpiredAt.setDate(vipExpiredAt.getDate() + welcomeBonus.days);
+            payload.vip = {
                 isVip: true,
                 plan: 'monthly',
                 expiredAt: vipExpiredAt,
                 grantedAt: new Date()
-            }
-        });
+            };
+            isVipGranted = true;
+        }
 
-        // Bắn thông báo chào mừng
-        await Notification.create({
-            recipient: user._id,
-            type: 'system',
-            title: '[Anh Tư] Chào mừng! 🎉',
-            body: 'Tài khoản mới của bạn đã được nhận thưởng 1 tháng VIP miễn phí. Chúc bạn xem phim vui vẻ!',
-            read: false,
-        });
+        const user = await User.create(payload);
+
+        // Send welcome notification conditionally
+        if (isVipGranted) {
+            await Notification.create({
+                recipient: user._id,
+                type: 'system',
+                title: '[Anh Tư] Chào mừng! 🎉',
+                body: `Tài khoản mới của bạn đã được nhận thưởng ${welcomeBonus.days} ngày VIP miễn phí. Chúc bạn xem phim vui vẻ!`,
+                read: false,
+            });
+        }
 
         const token = generateToken(user);
 
         res.status(201).json({
             success: true,
-            message: 'Đăng ký thành công và nhận thưởng 1 tháng VIP',
+            message: isVipGranted ? `Đăng ký thành công và nhận thưởng ${welcomeBonus.days} ngày VIP` : 'Đăng ký tài khoản thành công',
             data: { user: user.getPublicProfile(), token },
         });
     } catch (err) {
