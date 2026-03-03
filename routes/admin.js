@@ -71,6 +71,35 @@ router.post('/broadcast', authMiddleware, adminMiddleware, async (req, res) => {
     }
 });
 
+// GET /api/admin/public-settings (PUBLIC — không cần đăng nhập)
+// Chỉ trả về các setting an toàn cho client kiểm tra Force Update
+const PUBLIC_SETTING_KEYS = [
+    'minVersion',
+    'androidDownloadUrl',
+    'iosDownloadUrl',
+    'forceUpdateMessage',
+];
+
+router.get('/public-settings', async (req, res) => {
+    try {
+        const settings = await Setting.find({ key: { $in: PUBLIC_SETTING_KEYS } });
+        const configMap = {
+            // Giá trị mặc định an toàn (không kích hoạt force update)
+            minVersion: '1.0.0',
+            androidDownloadUrl: '',
+            iosDownloadUrl: '',
+            forceUpdateMessage: 'Phiên bản mới đã sẵn sàng. Vui lòng cập nhật để tiếp tục sử dụng.',
+        };
+        settings.forEach(s => {
+            configMap[s.key] = s.value;
+        });
+        res.json({ success: true, data: configMap });
+    } catch (err) {
+        console.error('Lỗi GET /public-settings:', err);
+        res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+});
+
 // GET /api/admin/settings
 router.get('/settings', authMiddleware, adminMiddleware, async (req, res) => {
     try {
