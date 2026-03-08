@@ -1,0 +1,196 @@
+/**
+ * socket/watchParty.js
+ * Quản lý phòng xem chung real-time qua Socket.io
+ */
+
+const jwt = require('jsonwebtoken');
+
+// Rooms lưu in-memory: { roomCode: { hostSocketId, movie, currentTime, isPlaying, members[], chat[] } }
+const rooms = new Map();
+
+function generateCode() {
+    return Math.random().toString(36).substring(2, 6).toUpperCase();
+}
+
+function getRoomBySocket(socketId) {
+    for (const [code, room] of rooms.entries()) {
+        if (room.members.some(m => m.socketId === socketId)) {
+            return { code, room };
+        }
+    }
+    return null;
+}
+
+module.exports = function setupWatchParty(io) {
+
+    // Auth middleware cho socket
+    io.use((socket, next) => {
+        const token = socket.handshake.auth?.token;
+        if (!token) return next(new Error('Chưa đăng nhập'));
+        try {
+            socket.user = jwt.verify(token, process.env.JWT_SECRET);
+            next();
+        } catch {
+            next(new Error('Token không hợp lệ'));
+        }
+    });
+
+    io.on('connection', (socket) => {
+        const { userId, username } = socket.user;
+        console.log(`[WatchParty] ${username} connected (${socket.id})`);
+
+        // ── TẠO PHÒNG ──────────────────────────────────────────────
+        socket.on('create-room', ({ movie }, cb) => {
+            let code;
+            do { code = generateCode(); } while (rooms.has(code));
+
+            rooms.set(code, {
+                hostSocketId: socket.id,
+                hostId: userId,
+                movie,
+                currentTime: 0,
+                isPlaying: false,
+                members: [{ userId, username, socketId: socket.id }],
+                chat: [],
+                createdAt: Date.now(),
+            });
+
+            socket.join(code);
+            console.log(`[WatchParty] ${username} tạo phòng ${code}`);
+            cb?.({ success: true, roomCode: code });
+        });
+
+        // ── VÀO PHÒNG ──────────────────────────────────────────────
+        socket.on('join-room', ({ roomCode }, cb) => {
+            const room = rooms.get(roomCode);
+            if (!room) return cb?.({ success: false, message: 'Phòng không tồn tại hoặc đã đóng' });
+
+            // Tránh join 2 lần
+            if (!room.members.find(m => m.userId === userId)) {
+                room.members.push({ userId, username, socketId: socket.id });
+            } else {
+                // Update socketId nếu reconnect
+                const m = room.members.find(m => m.userId === userId);
+                if (m) m.socketId = socket.id;
+            }
+
+            socket.join(roomCode);
+
+            // Thông báo cho cả phòng
+            io.to(roomCode).emit('member-update', { members: room.members });
+
+            // Trả về state hiện tại để client sync
+            cb?.({
+                success: true,
+                movie: room.movie,
+                currentTime: room.currentTime,
+                isPlaying: room.isPlaying,
+                members: room.members,
+                chat: room.chat.slice(-30),
+                isHost: room.hostId === userId,
+            });
+
+            console.log(`[WatchParty] ${username} vào phòng ${roomCode}`);
+        });
+
+        // ── PLAY ───────────────────────────────────────────────────
+        socket.on('sync-play', ({ roomCode, currentTime }) => {
+            const room = rooms.get(roomCode);
+            if (!room) return;
+            room.currentTime = currentTime;
+            room.isPlaying = true;
+            socket.to(roomCode).emit('remote-play', { currentTime, by: username });
+        });
+
+        // ── PAUSE ──────────────────────────────────────────────────
+        socket.on('sync-pause', ({ roomCode, currentTime }) => {
+            const room = rooms.get(roomCode);
+            if (!room) return;
+            room.currentTime = currentTime;
+            room.isPlaying = false;
+            socket.to(roomCode).emit('remote-pause', { currentTime, by: username });
+        });
+
+        // ── SEEK ───────────────────────────────────────────────────
+        socket.on('sync-seek', ({ roomCode, currentTime }) => {
+            const room = rooms.get(roomCode);
+            if (!room) return;
+            room.currentTime = currentTime;
+            socket.to(roomCode).emit('remote-seek', { currentTime, by: username });
+        });
+
+        // ── ĐỔI TẬP ───────────────────────────────────────────────
+        socket.on('change-episode', ({ roomCode, episode }) => {
+            const room = rooms.get(roomCode);
+            if (!room || room.hostId !== userId) return; // Chỉ host được đổi tập
+            room.currentTime = 0;
+            room.isPlaying = false;
+            io.to(roomCode).emit('remote-episode', { episode });
+        });
+
+        // ── CHAT ───────────────────────────────────────────────────
+        socket.on('chat-message', ({ roomCode, text }) => {
+            const room = rooms.get(roomCode);
+            if (!room || !text?.trim()) return;
+
+            const msg = {
+                id: Date.now().toString(),
+                userId,
+                username,
+                text: text.trim().slice(0, 200),
+                time: new Date().toISOString(),
+            };
+
+            room.chat.push(msg);
+            if (room.chat.length > 100) room.chat = room.chat.slice(-100);
+
+            io.to(roomCode).emit('chat-message', msg);
+        });
+
+        // ── PING để cập nhật currentTime ──────────────────────────
+        socket.on('ping-time', ({ roomCode, currentTime }) => {
+            const room = rooms.get(roomCode);
+            if (room) room.currentTime = currentTime;
+        });
+
+        // ── RỜI PHÒNG ─────────────────────────────────────────────
+        socket.on('leave-room', ({ roomCode }) => {
+            leaveRoom(socket, roomCode, io);
+        });
+
+        // ── DISCONNECT ─────────────────────────────────────────────
+        socket.on('disconnect', () => {
+            console.log(`[WatchParty] ${username} disconnected`);
+            const result = getRoomBySocket(socket.id);
+            if (result) leaveRoom(socket, result.code, io);
+        });
+    });
+
+    // Dọn phòng cũ mỗi 30 phút
+    setInterval(() => {
+        const cutoff = Date.now() - 30 * 60 * 1000;
+        for (const [code, room] of rooms.entries()) {
+            if (room.createdAt < cutoff && room.members.length === 0) {
+                rooms.delete(code);
+            }
+        }
+    }, 30 * 60 * 1000);
+};
+
+function leaveRoom(socket, roomCode, io) {
+    const room = rooms.get(roomCode);
+    if (!room) return;
+
+    const { userId } = socket.user;
+    room.members = room.members.filter(m => m.userId !== userId);
+    socket.leave(roomCode);
+
+    if (room.members.length === 0 || room.hostId === userId) {
+        // Host rời hoặc phòng trống → đóng phòng
+        io.to(roomCode).emit('room-closed', { message: 'Host đã rời phòng' });
+        rooms.delete(roomCode);
+        console.log(`[WatchParty] Phòng ${roomCode} đã đóng`);
+    } else {
+        io.to(roomCode).emit('member-update', { members: room.members });
+    }
+}
