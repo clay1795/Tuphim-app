@@ -82,6 +82,7 @@ module.exports = function setupWatchParty(io) {
             // Trả về state hiện tại để client sync
             cb?.({
                 success: true,
+                roomCode,
                 movie: room.movie,
                 currentTime: room.currentTime,
                 isPlaying: room.isPlaying,
