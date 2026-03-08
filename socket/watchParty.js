@@ -133,7 +133,7 @@ module.exports = function setupWatchParty(io) {
             room.currentEpisode = episode; // Lưu tên tập mới
             room.isPlaying = false;
             room.lastActivity = Date.now();
-            io.to(roomCode).emit('remote-episode', { episode });
+            socket.to(roomCode).emit('remote-episode', { episode }); // socket.to() = gửi cho joiners, không gửi lại host
         });
 
         // ── CHAT ───────────────────────────────────────────────────
