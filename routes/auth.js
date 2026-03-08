@@ -396,5 +396,32 @@ router.delete('/history', authMiddleware, async (req, res) => {
     }
 });
 
+// ── POST /api/auth/push-token ─────────────────────────────────────────────────
+// Lưu Expo Push Token để gửi notification
+router.post('/push-token', authMiddleware, async (req, res) => {
+    try {
+        const { token, platform } = req.body;
+        if (!token) return res.status(400).json({ success: false, message: 'Token là bắt buộc' });
+
+        const user = await User.findById(req.user.userId);
+        if (!user) return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });
+
+        // Lưu push token vào user (tránh trùng lặp)
+        if (!user.pushTokens) user.pushTokens = [];
+        if (!user.pushTokens.includes(token)) {
+            user.pushTokens.push(token);
+            // Giới hạn 5 token (tránh tích lũy token cũ)
+            if (user.pushTokens.length > 5) user.pushTokens = user.pushTokens.slice(-5);
+            user.markModified('pushTokens');
+            await user.save();
+        }
+
+        res.json({ success: true, message: 'Push token đã lưu' });
+    } catch (err) {
+        console.error('Push token error:', err);
+        res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+});
+
 module.exports = router;
 

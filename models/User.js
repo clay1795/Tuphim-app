@@ -32,6 +32,9 @@ const userSchema = new mongoose.Schema({
     // Account status
     isActive: { type: Boolean, default: true },
     lastLogin: { type: Date },
+
+    // Push Notification Tokens (Expo)
+    pushTokens: [{ type: String }],
 }, { timestamps: true });
 
 // Hash password before saving
