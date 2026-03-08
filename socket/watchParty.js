@@ -67,11 +67,18 @@ module.exports = function setupWatchParty(io) {
             const room = rooms.get(roomCode);
             if (!room) return cb?.({ success: false, message: 'Phòng không tồn tại hoặc đã đóng' });
 
-            // Tránh join 2 lần
-            if (!room.members.find(m => m.userId === userId)) {
+            // Nếu host reconnect trong grace period, hủy timer và tiếp tục
+            if (room.hostId === userId && room.hostGraceTimer) {
+                clearTimeout(room.hostGraceTimer);
+                room.hostGraceTimer = null;
+                const m = room.members.find(m => m.userId === userId);
+                if (m) m.socketId = socket.id;
+                else room.members.push({ userId, username, socketId: socket.id });
+                room.hostSocketId = socket.id;
+                io.to(roomCode).emit('host-reconnected', { username });
+            } else if (!room.members.find(m => m.userId === userId)) {
                 room.members.push({ userId, username, socketId: socket.id });
             } else {
-                // Update socketId nếu reconnect
                 const m = room.members.find(m => m.userId === userId);
                 if (m) m.socketId = socket.id;
             }
@@ -165,16 +172,43 @@ module.exports = function setupWatchParty(io) {
             }
         });
 
-        // ── RỜI PHÒNG ─────────────────────────────────────────────
+        // ── RỜI PHÒNG (explicit) ─────────────────────────────────
         socket.on('leave-room', ({ roomCode }) => {
-            leaveRoom(socket, roomCode, io);
+            // Explicit leave: hủy grace timer nếu có, rồi đóng phòng ngay
+            const room = rooms.get(roomCode);
+            if (room?.hostGraceTimer) {
+                clearTimeout(room.hostGraceTimer);
+                room.hostGraceTimer = null;
+            }
+            leaveRoom(socket, roomCode, io, true);
         });
 
-        // ── DISCONNECT ─────────────────────────────────────────────
+        // ── DISCONNECT (mất mạng / đóng app) ───────────────────────
         socket.on('disconnect', () => {
-            console.log(`[WatchParty] ${username} disconnected`);
             const result = getRoomBySocket(socket.id);
-            if (result) leaveRoom(socket, result.code, io);
+            if (!result) return;
+            const { code, room } = result;
+
+            if (room.hostId === userId) {
+                // Host mất kết nối → grace period 15 phút
+                room.members = room.members.filter(m => m.userId !== userId);
+                socket.leave(code);
+                io.to(code).emit('host-disconnected', {
+                    message: 'Host mất kết nối, chờ 15 phút...',
+                });
+                console.log(`[WatchParty] Host ${username} disconnected - grace 15p phòng ${code}`);
+
+                room.hostGraceTimer = setTimeout(() => {
+                    // Hết 15 phút mà host chưa vào lại → đóng phòng
+                    if (rooms.has(code)) {
+                        io.to(code).emit('room-closed', { message: 'Host không kết nối lại sau 15 phút' });
+                        rooms.delete(code);
+                        console.log(`[WatchParty] Đóng phòng ${code} (host vắng 15p)`);
+                    }
+                }, 15 * 60 * 1000);
+            } else {
+                leaveRoom(socket, code, io, false);
+            }
         });
     });
 
