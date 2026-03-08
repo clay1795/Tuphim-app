@@ -47,7 +47,7 @@ router.get('/:slug/reviews', async (req, res) => {
 
 // ── POST /api/movies/:slug/review ──────────────────────────────────────────────
 // Tạo mới hoặc cập nhật review (upsert)
-router.post('/:slug/review', authenticate, async (req, res) => {
+router.post('/:slug/review', authMiddleware, async (req, res) => {
     try {
         const { slug } = req.params;
         const { score, text = '' } = req.body;
@@ -77,7 +77,7 @@ router.post('/:slug/review', authenticate, async (req, res) => {
 });
 
 // ── DELETE /api/movies/:slug/review ───────────────────────────────────────────
-router.delete('/:slug/review', authenticate, async (req, res) => {
+router.delete('/:slug/review', authMiddleware, async (req, res) => {
     try {
         const { slug } = req.params;
         const deleted = await Review.findOneAndDelete({ slug, user: req.user._id });
