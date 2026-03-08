@@ -49,10 +49,12 @@ module.exports = function setupWatchParty(io) {
                 hostId: userId,
                 movie,
                 currentTime: 0,
+                currentEpisode: null, // Lưu tên tập host đang xem
                 isPlaying: false,
                 members: [{ userId, username, socketId: socket.id }],
                 chat: [],
                 createdAt: Date.now(),
+                lastActivity: Date.now(),
             });
 
             socket.join(code);
@@ -85,6 +87,7 @@ module.exports = function setupWatchParty(io) {
                 roomCode,
                 movie: room.movie,
                 currentTime: room.currentTime,
+                currentEpisode: room.currentEpisode,
                 isPlaying: room.isPlaying,
                 members: room.members,
                 chat: room.chat.slice(-30),
@@ -109,23 +112,27 @@ module.exports = function setupWatchParty(io) {
             if (!room) return;
             room.currentTime = currentTime;
             room.isPlaying = false;
+            room.lastActivity = Date.now();
             socket.to(roomCode).emit('remote-pause', { currentTime, by: username });
         });
 
-        // ── SEEK ───────────────────────────────────────────────────
+        // ── SEEK ─────────────────────────────────────────
         socket.on('sync-seek', ({ roomCode, currentTime }) => {
             const room = rooms.get(roomCode);
             if (!room) return;
             room.currentTime = currentTime;
+            room.lastActivity = Date.now();
             socket.to(roomCode).emit('remote-seek', { currentTime, by: username });
         });
 
-        // ── ĐỔI TẬP ───────────────────────────────────────────────
+        // ── ĐỔI TẬP ───────────────────────────────────────
         socket.on('change-episode', ({ roomCode, episode }) => {
             const room = rooms.get(roomCode);
-            if (!room || room.hostId !== userId) return; // Chỉ host được đổi tập
+            if (!room || room.hostId !== userId) return;
             room.currentTime = 0;
+            room.currentEpisode = episode; // Lưu tên tập mới
             room.isPlaying = false;
+            room.lastActivity = Date.now();
             io.to(roomCode).emit('remote-episode', { episode });
         });
 
@@ -144,14 +151,18 @@ module.exports = function setupWatchParty(io) {
 
             room.chat.push(msg);
             if (room.chat.length > 100) room.chat = room.chat.slice(-100);
+            room.lastActivity = Date.now();
 
             io.to(roomCode).emit('chat-message', msg);
         });
 
-        // ── PING để cập nhật currentTime ──────────────────────────
+        // ── PING để cập nhật currentTime ──────────────────────
         socket.on('ping-time', ({ roomCode, currentTime }) => {
             const room = rooms.get(roomCode);
-            if (room) room.currentTime = currentTime;
+            if (room) {
+                room.currentTime = currentTime;
+                room.lastActivity = Date.now();
+            }
         });
 
         // ── RỜI PHÒNG ─────────────────────────────────────────────
@@ -167,15 +178,17 @@ module.exports = function setupWatchParty(io) {
         });
     });
 
-    // Dọn phòng cũ mỗi 30 phút
+    // Dọn phòng không hoạt động sau 2 tiếng (không phân biệt có members hay không)
     setInterval(() => {
-        const cutoff = Date.now() - 30 * 60 * 1000;
+        const cutoff = Date.now() - 2 * 60 * 60 * 1000; // 2 tiếng
         for (const [code, room] of rooms.entries()) {
-            if (room.createdAt < cutoff && room.members.length === 0) {
+            if ((room.lastActivity || room.createdAt) < cutoff) {
+                io.to(code).emit('room-closed', { message: 'Phòng đã hết giờ (2h không hoạt động)' });
                 rooms.delete(code);
+                console.log(`[WatchParty] Auto-closed phòng ${code} (inactive 2h)`);
             }
         }
-    }, 30 * 60 * 1000);
+    }, 15 * 60 * 1000); // Kiểm tra mỗi 15 phút
 };
 
 function leaveRoom(socket, roomCode, io) {
