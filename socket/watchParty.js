@@ -172,15 +172,30 @@ module.exports = function setupWatchParty(io) {
             }
         });
 
-        // ── RỜI PHÒNG (explicit) ─────────────────────────────────
+        // ── RỜI PHÒNG ────────────────────────────────────────────
         socket.on('leave-room', ({ roomCode }) => {
-            // Explicit leave: hủy grace timer nếu có, rồi đóng phòng ngay
             const room = rooms.get(roomCode);
-            if (room?.hostGraceTimer) {
-                clearTimeout(room.hostGraceTimer);
-                room.hostGraceTimer = null;
+            if (!room) return;
+
+            if (room.hostId === userId) {
+                // Host rời → grace period 15 phút để reconnect
+                if (room.hostGraceTimer) return; // đã có timer rồi, bỏ qua
+                room.members = room.members.filter(m => m.userId !== userId);
+                socket.leave(roomCode);
+                io.to(roomCode).emit('host-disconnected', {
+                    message: 'Host đã thoát, chờ 15 phút để vào lại...',
+                });
+                room.hostGraceTimer = setTimeout(() => {
+                    if (rooms.has(roomCode)) {
+                        io.to(roomCode).emit('room-closed', { message: 'Host không vào lại sau 15 phút' });
+                        rooms.delete(roomCode);
+                        console.log(`[WatchParty] Đóng phòng ${roomCode} (host vắng 15p)`);
+                    }
+                }, 15 * 60 * 1000);
+            } else {
+                // Joiner rời → leaveRoom ngay
+                leaveRoom(socket, roomCode, io);
             }
-            leaveRoom(socket, roomCode, io, true);
         });
 
         // ── DISCONNECT (mất mạng / đóng app) ───────────────────────
